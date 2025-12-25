@@ -2,6 +2,8 @@
 
 A native macOS desktop application built with SwiftUI and Xcode for translating text and fixing grammar errors using AI services (OpenAI and OpenRouter).
 
+![App Interface](docs/images/app.png)
+
 ## Features
 
 - ✨ **Dual AI Support**: Choose between OpenAI and OpenRouter
@@ -79,6 +81,10 @@ Add all Swift files to your Xcode project:
 
 LanguageSuggestion can automatically get text from other applications like Microsoft Teams:
 
+![Menu Support in Third-Party Apps](docs/images/notes.png)
+
+*LanguageSuggestion menu integration in Notes and other macOS applications*
+
 #### First Time Setup:
 1. Click "Get from Teams" or "Get Focused Text" button
 2. macOS will prompt you to grant Accessibility permissions
@@ -154,6 +160,11 @@ LanguageSuggestion/
 - Default action selection
 - Default target language
 - Provider switching
+- **Custom Prompts**: Create custom prompts that appear in the menu bar for quick access
+
+![Settings and Custom Prompts](docs/images/menu-settings.png)
+
+*Settings window showing API configuration and custom prompts that create menu support items*
 
 ### Accessibility Integration
 - Get text directly from Microsoft Teams
