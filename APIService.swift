@@ -6,10 +6,30 @@
 //
 
 import Foundation
+import Observation
 
-class APIService: ObservableObject {
-    @Published var isLoading = false
-    @Published var errorMessage: String?
+protocol APIServiceProtocol {
+    var isLoading: Bool { get }
+    var errorMessage: String? { get }
+    func processText(
+        text: String,
+        action: ActionType,
+        targetLanguage: String?,
+        provider: APIProvider,
+        apiKey: String
+    ) async throws -> AIResponse
+    func processTextWithCustomPrompt(
+        text: String,
+        customPrompt: String,
+        provider: APIProvider,
+        apiKey: String
+    ) async throws -> AIResponse
+}
+
+@Observable
+final class APIService: APIServiceProtocol {
+    var isLoading = false
+    var errorMessage: String?
     
     private let session = URLSession.shared
     

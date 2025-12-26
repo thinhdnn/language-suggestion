@@ -9,28 +9,35 @@ import SwiftUI
 
 @main
 struct LanguageSuggestionApp: App {
-    @StateObject private var settingsManager = SettingsManager()
-    @StateObject private var menuBarManager = MenuBarManager()
-    @StateObject private var accessibilityService = AccessibilityService()
+    @State private var settingsManager = SettingsManager()
+    @State private var menuBarManager = MenuBarManager()
+    @State private var accessibilityService = AccessibilityService()
+    @State private var apiService = APIService()
+    @State private var floatingOverlayManager = FloatingOverlayManager()
     @State private var showOnboarding = false
     
     var body: some Scene {
         WindowGroup {
             Group {
                 if showOnboarding {
-                    OnboardingGuideView(accessibilityService: accessibilityService) {
+                    OnboardingGuideView(
+                        settingsManager: settingsManager,
+                        accessibilityService: accessibilityService
+                    ) {
                         showOnboarding = false
                     }
-                    .environmentObject(settingsManager)
                 } else {
-                    ContentView()
-                        .environmentObject(settingsManager)
-                        .environmentObject(menuBarManager)
-                        .frame(minWidth: 800, minHeight: 600)
-                        .onAppear {
-                            // Setup menu bar when app appears
-                            menuBarManager.setupMenuBar(settingsManager: settingsManager)
-                        }
+                    ContentView(
+                        apiService: apiService,
+                        accessibilityService: accessibilityService,
+                        floatingOverlayManager: floatingOverlayManager,
+                        settingsManager: settingsManager,
+                        menuBarManager: menuBarManager
+                    )
+                    .frame(minWidth: 800, minHeight: 600)
+                    .onAppear {
+                        menuBarManager.setupMenuBar(settingsManager: settingsManager)
+                    }
                 }
             }
             .onAppear {
@@ -49,8 +56,7 @@ struct LanguageSuggestionApp: App {
         }
         
         Settings {
-            SettingsView()
-                .environmentObject(settingsManager)
+            SettingsView(settingsManager: settingsManager)
         }
     }
     
@@ -59,7 +65,7 @@ struct LanguageSuggestionApp: App {
         let onboardingCompleted = UserDefaults.standard.bool(forKey: "onboardingCompleted")
         
         // Refresh accessibility status
-        accessibilityService.checkAccessibilityPermission()
+        _ = accessibilityService.checkAccessibilityPermission()
         
         if onboardingCompleted {
             // Onboarding was completed, check if setup is still valid

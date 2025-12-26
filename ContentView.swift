@@ -9,27 +9,33 @@ import SwiftUI
 import AppKit
 
 struct ContentView: View {
-    @EnvironmentObject var settingsManager: SettingsManager
-    @EnvironmentObject var menuBarManager: MenuBarManager
-    @StateObject private var apiService = APIService()
-    @StateObject private var accessibilityService = AccessibilityService()
-    @StateObject private var floatingOverlayManager = FloatingOverlayManager()
+    @Bindable var viewModel: ContentViewModel
+    @Bindable var apiService: APIService
+    @Bindable var settingsManager: SettingsManager
+    @Bindable var accessibilityService: AccessibilityService
     
-    @State private var inputText: String = "Thiss sentence have a bigg typo and bad grammer, pls fix."
-    @State private var outputText: String = ""
-    @State private var currentAction: ActionType = .fixGrammar
-    @State private var showChanges: Bool = false
-    @State private var changes: [TextChange] = []
-    @State private var confidence: Double?
-    @State private var targetLanguage: String = "English"
-    @State private var isScanningForOverlay: Bool = false
-    @State private var suggestionPopup: NSWindow?
-    @State private var suggestionText: String = ""
-    @State private var isProcessingSuggestion: Bool = false
-    @State private var currentActionName: String = "Grammar Suggestion"
+    init(
+        apiService: APIService,
+        accessibilityService: AccessibilityService,
+        floatingOverlayManager: FloatingOverlayManager,
+        settingsManager: SettingsManager,
+        menuBarManager: MenuBarManager
+    ) {
+        let viewModel = ContentViewModel(
+            apiService: apiService,
+            accessibilityService: accessibilityService,
+            floatingOverlayManager: floatingOverlayManager,
+            settingsManager: settingsManager,
+            menuBarManager: menuBarManager
+        )
+        self.viewModel = viewModel
+        self.apiService = apiService
+        self.settingsManager = settingsManager
+        self.accessibilityService = accessibilityService
+    }
     
     private var wordCount: Int {
-        inputText.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+        viewModel.inputText.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
     }
     
     var body: some View {
@@ -56,7 +62,7 @@ struct ContentView: View {
                 
                 HStack {
                     Button {
-                        processText()
+                        viewModel.processText()
                     } label: {
                         Label("Process Now", systemImage: "arrow.right.circle.fill")
                             .font(.headline)
@@ -65,7 +71,14 @@ struct ContentView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.blue)
-                    .disabled(inputText.isEmpty || apiService.isLoading || settingsManager.currentAPIKey.isEmpty)
+                    .disabled(viewModel.inputText.isEmpty || apiService.isLoading || settingsManager.currentAPIKey.isEmpty)
+                    .onHover { inside in
+                        if inside {
+                            NSCursor.pointingHand.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
                     
                     if apiService.isLoading {
                         ProgressView()
@@ -82,23 +95,23 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button(action: processText) {
+                Button(action: { viewModel.processText() }) {
                     Label("Process", systemImage: "sparkles")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.blue)
-                .disabled(inputText.isEmpty || apiService.isLoading || settingsManager.currentAPIKey.isEmpty)
+                .disabled(viewModel.inputText.isEmpty || apiService.isLoading || settingsManager.currentAPIKey.isEmpty)
             }
             
             ToolbarItem(placement: .secondaryAction) {
-                Button(action: copyOutput) {
+                Button(action: { viewModel.copyOutput() }) {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
-                .disabled(outputText.isEmpty)
+                .disabled(viewModel.outputText.isEmpty)
             }
             
             ToolbarItem(placement: .secondaryAction) {
-                Button(action: clearAll) {
+                Button(action: { viewModel.clearAll() }) {
                     Label("Clear", systemImage: "trash")
                 }
             }
@@ -115,12 +128,7 @@ struct ContentView: View {
             Text(apiService.errorMessage ?? "")
         }
         .onAppear {
-            currentAction = settingsManager.defaultAction
-            targetLanguage = settingsManager.targetLanguage
-            setupNotificationHandlers()
-            
-            // Auto-show floating overlay on startup with retry
-            autoShowOverlayWithRetry()
+            viewModel.initialize()
         }
     }
     
@@ -140,8 +148,8 @@ struct ContentView: View {
             )
             
             StatusPill(
-                title: currentAction.rawValue,
-                systemImage: currentAction == .translate ? "globe" : "text.badge.checkmark",
+                title: viewModel.currentAction.rawValue,
+                systemImage: viewModel.currentAction == .translate ? "globe" : "text.badge.checkmark",
                 color: .purple.opacity(0.15),
                 textColor: .purple
             )
@@ -157,7 +165,7 @@ struct ContentView: View {
             
             // Accessibility permission indicator
             Button(action: {
-                accessibilityService.openAccessibilitySettings()
+                viewModel.openAccessibilitySettings()
             }) {
                 Text(accessibilityService.isAccessibilityEnabled ? "Accessibility ✓" : "Grant Permission")
                     .font(.caption)
@@ -171,10 +179,17 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .help(accessibilityService.isAccessibilityEnabled ? "Accessibility Enabled ✓" : "Click to Grant Accessibility Permission")
+            .onHover { inside in
+                if inside {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
             
             // Settings button
             Button(action: {
-                menuBarManager.openSettings()
+                viewModel.openSettings()
             }) {
                 Image(systemName: "gearshape.fill")
                     .font(.title3)
@@ -187,6 +202,13 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .help("Open Settings")
+            .onHover { inside in
+                if inside {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
         }
         .padding(.horizontal, 10)
     }
@@ -197,7 +219,7 @@ struct ContentView: View {
                 Text("Input")
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Picker("Action", selection: $currentAction) {
+                Picker("Action", selection: $viewModel.currentAction) {
                     ForEach(ActionType.allCases, id: \.self) { action in
                         Text(action.rawValue).tag(action)
                     }
@@ -206,19 +228,19 @@ struct ContentView: View {
                 .frame(width: 220)
             }
             
-            if currentAction == .translate {
+            if viewModel.currentAction == .translate {
                 HStack(spacing: 8) {
                     Label("Target Language", systemImage: "globe")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                    TextField("e.g. Vietnamese", text: $targetLanguage)
+                    TextField("e.g. Vietnamese", text: $viewModel.targetLanguage)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 180)
                 }
             }
             
             RichCard {
-                TextEditor(text: $inputText)
+                TextEditor(text: $viewModel.inputText)
                     .font(.system(.body, design: .default))
                     .scrollContentBackground(.hidden)
                     .background(Color.clear)
@@ -229,7 +251,7 @@ struct ContentView: View {
                     Label("\(wordCount) words", systemImage: "character.cursor.ibeam")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    if inputText.isEmpty {
+                    if viewModel.inputText.isEmpty {
                         Text("Paste or type your text here to translate or fix grammar.")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -239,8 +261,8 @@ struct ContentView: View {
                 .padding(.bottom, 8)
             }
             .overlay(alignment: .bottomTrailing) {
-                if !floatingOverlayManager.isOverlayVisible && !isScanningForOverlay {
-                    Button(action: showOverlay) {
+                if !viewModel.floatingOverlayManager.isOverlayVisible && !viewModel.isScanningForOverlay {
+                    Button(action: { viewModel.showOverlay() }) {
                         Image(systemName: "arrow.clockwise.circle")
                             .font(.title3)
                             .foregroundColor(.blue.opacity(0.7))
@@ -248,7 +270,14 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     .help("Retry showing overlay on supported apps (Teams, Notes)")
                     .padding(12)
-                } else if isScanningForOverlay {
+                    .onHover { inside in
+                        if inside {
+                            NSCursor.pointingHand.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
+                } else if viewModel.isScanningForOverlay {
                     ProgressView()
                         .controlSize(.small)
                         .padding(12)
@@ -265,7 +294,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 10) {
             outputHeader
             
-            if showChanges && !changes.isEmpty {
+            if viewModel.showChanges && !viewModel.changes.isEmpty {
                 changesSection
             }
             
@@ -283,7 +312,7 @@ struct ContentView: View {
             Text("Output")
                 .font(.title3.weight(.semibold))
             Spacer()
-            if let confidence = confidence {
+            if let confidence = viewModel.confidence {
                 StatusPill(
                     title: "\(Int(confidence * 100))% confidence",
                     systemImage: "checkmark.seal.fill",
@@ -291,12 +320,19 @@ struct ContentView: View {
                     textColor: .green
                 )
             }
-            if !changes.isEmpty {
-                Button(action: { showChanges.toggle() }) {
-                    Label(showChanges ? "Hide Changes" : "Show Changes", systemImage: showChanges ? "eye.slash" : "eye")
+            if !viewModel.changes.isEmpty {
+                Button(action: { viewModel.showChanges.toggle() }) {
+                    Label(viewModel.showChanges ? "Hide Changes" : "Show Changes", systemImage: viewModel.showChanges ? "eye.slash" : "eye")
                         .font(.subheadline)
                 }
                 .buttonStyle(.bordered)
+                .onHover { inside in
+                    if inside {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
             }
         }
     }
@@ -306,8 +342,8 @@ struct ContentView: View {
         RichCard {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(changes.indices, id: \.self) { idx in
-                        ChangeRow(change: changes[idx])
+                    ForEach(viewModel.changes.indices, id: \.self) { idx in
+                        ChangeRow(change: viewModel.changes[idx])
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -319,387 +355,12 @@ struct ContentView: View {
     private var outputTextSection: some View {
         RichCard {
             ScrollView {
-                Text(outputText.isEmpty ? "Processed text will appear here..." : outputText)
+                Text(viewModel.outputText.isEmpty ? "Processed text will appear here..." : viewModel.outputText)
                     .font(.system(.body, design: .default))
-                    .foregroundColor(outputText.isEmpty ? .secondary : .primary)
+                    .foregroundColor(viewModel.outputText.isEmpty ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
                     .textSelection(.enabled)
-            }
-        }
-    }
-    
-    private func processText() {
-        guard !inputText.isEmpty else { return }
-        guard !settingsManager.currentAPIKey.isEmpty else {
-            apiService.errorMessage = "Please configure your API key in Settings."
-            return
-        }
-        
-        Task {
-            do {
-                let response = try await apiService.processText(
-                    text: inputText,
-                    action: currentAction,
-                    targetLanguage: currentAction == .translate ? targetLanguage : nil,
-                    provider: settingsManager.apiProvider,
-                    apiKey: settingsManager.currentAPIKey
-                )
-                
-                await MainActor.run {
-                    outputText = response.processedText
-                    changes = response.changes ?? []
-                    confidence = response.confidence
-                    showChanges = !changes.isEmpty
-                }
-            } catch {
-                await MainActor.run {
-                    apiService.errorMessage = error.localizedDescription
-                }
-            }
-        }
-    }
-    
-    private func processCustomPrompt(_ customPrompt: CustomPrompt) {
-        // Get text from focused element
-        var textToProcess: String?
-        
-        // Try to get selected text first
-        if let text = accessibilityService.getTextFromFocusedElement(), !text.isEmpty {
-            textToProcess = text
-            print("✅ Got text from focused element: \(text.prefix(50))...")
-        } else if let text = accessibilityService.getTextFromTeams(), !text.isEmpty {
-            textToProcess = text
-            print("✅ Got text from Teams: \(text.prefix(50))...")
-        }
-        
-        guard let text = textToProcess, !text.isEmpty else {
-            print("❌ No text found to process")
-            apiService.errorMessage = "No text found. Please select or focus on some text first."
-            return
-        }
-        
-        guard !settingsManager.currentAPIKey.isEmpty else {
-            apiService.errorMessage = "Please configure your API key in Settings."
-            return
-        }
-        
-        // Update input text and action name
-        inputText = text
-        currentActionName = customPrompt.name
-        
-        // Process with custom prompt
-        Task {
-            do {
-                let response = try await apiService.processTextWithCustomPrompt(
-                    text: text,
-                    customPrompt: customPrompt.prompt,
-                    provider: settingsManager.apiProvider,
-                    apiKey: settingsManager.currentAPIKey
-                )
-                
-                await MainActor.run {
-                    outputText = response.processedText
-                    changes = response.changes ?? []
-                    confidence = response.confidence
-                    showChanges = !changes.isEmpty
-                    
-                    // Show suggestion popup with custom prompt name
-                    showSuggestionPopup(suggestion: response.processedText, title: customPrompt.name)
-                    
-                    // Copy to clipboard automatically
-                    let pasteboard = NSPasteboard.general
-                    pasteboard.clearContents()
-                    pasteboard.setString(response.processedText, forType: .string)
-                    print("📋 Result copied to clipboard")
-                }
-            } catch {
-                await MainActor.run {
-                    apiService.errorMessage = error.localizedDescription
-                }
-            }
-        }
-    }
-    
-    private func copyOutput() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(outputText, forType: .string)
-    }
-    
-    private func clearAll() {
-        inputText = ""
-        outputText = ""
-        changes = []
-        confidence = nil
-        showChanges = false
-    }
-    
-    private func showOverlay() {
-        print("🚀 Starting overlay scan for supported apps...")
-        
-        // Check if any supported app is running
-        let workspace = NSWorkspace.shared
-        let runningApps = workspace.runningApplications
-        
-        let teamsRunning = runningApps.contains { app in
-            app.bundleIdentifier == "com.microsoft.teams" || 
-            app.bundleIdentifier == "com.microsoft.teams2"
-        }
-        
-        let notesRunning = runningApps.contains { app in
-            app.bundleIdentifier == "com.apple.Notes"
-        }
-        
-        if !teamsRunning && !notesRunning {
-            print("⚠️ Neither Teams nor Notes is running!")
-        } else {
-            if teamsRunning { print("✅ Teams is running") }
-            if notesRunning { print("✅ Notes is running") }
-        }
-        
-        // Check accessibility permission
-        if !accessibilityService.checkAccessibilityPermission() {
-            print("❌ Accessibility permission not granted - click shield icon to grant permission")
-            return
-        }
-        
-        isScanningForOverlay = true
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            // Try Teams first
-            if teamsRunning {
-                print("🔍 Scanning for Teams compose box (depth: 25)...")
-                if let composeBox = self.accessibilityService.findTeamsComposeBox(maxDepth: 25) {
-                    DispatchQueue.main.async {
-                        print("✅ Found Teams compose box, showing overlay")
-                        self.floatingOverlayManager.showOverlay(for: composeBox, accessibilityService: self.accessibilityService, settingsManager: self.settingsManager)
-                        self.isScanningForOverlay = false
-                    }
-                    return
-                }
-            }
-            
-            // Try Notes if Teams failed or not running
-            if notesRunning {
-                print("🔍 Scanning for Notes text area (depth: 25)...")
-                if let notesTextArea = self.accessibilityService.findNotesTextArea(maxDepth: 25) {
-                    DispatchQueue.main.async {
-                        print("✅ Found Notes text area, showing overlay")
-                        self.floatingOverlayManager.showOverlay(for: notesTextArea, accessibilityService: self.accessibilityService, settingsManager: self.settingsManager)
-                        self.isScanningForOverlay = false
-                    }
-                    return
-                }
-            }
-            
-            // If we get here, nothing was found
-            DispatchQueue.main.async {
-                print("❌ Could not find text area in any supported app")
-                print("💡 Make sure Teams or Notes is open with an active text field")
-                self.isScanningForOverlay = false
-            }
-        }
-    }
-    
-    private func setupNotificationHandlers() {
-        // Handle execute custom prompt from menu bar
-        NotificationCenter.default.addObserver(
-            forName: .executeCustomPrompt,
-            object: nil,
-            queue: .main
-        ) { notification in
-            guard let userInfo = notification.userInfo,
-                  let customPrompt = userInfo["customPrompt"] as? CustomPrompt else {
-                print("❌ No custom prompt in notification")
-                return
-            }
-            
-            print("🚀 Processing custom prompt: \(customPrompt.name)")
-            self.processCustomPrompt(customPrompt)
-        }
-        
-        // Handle capture text from overlay and auto-fix
-        NotificationCenter.default.addObserver(
-            forName: .captureTextFromOverlay,
-            object: nil,
-            queue: .main
-        ) { [weak accessibilityService] _ in
-            print("📸 Capture text triggered from overlay")
-            
-            guard let accessibilityService = accessibilityService else { return }
-            
-            // Try to get text from the focused element (works for both Teams and Notes)
-            var capturedText: String?
-            
-            // First try getting text from Teams if it's running
-            if let text = accessibilityService.getTextFromTeams(), !text.isEmpty {
-                capturedText = text
-                print("✅ Text captured from Teams: \(text.prefix(50))...")
-            }
-            // If Teams didn't work, try getting from focused element (works for Notes)
-            else if let text = accessibilityService.getTextFromFocusedElement(), !text.isEmpty {
-                capturedText = text
-                print("✅ Text captured from focused element: \(text.prefix(50))...")
-            }
-            
-            if let text = capturedText {
-                // Store original text
-                self.inputText = text
-                self.isProcessingSuggestion = true
-                self.currentActionName = "Fix Grammar"
-                
-                // Auto-call API to fix grammar
-                print("🔧 Auto-fixing grammar...")
-                Task {
-                    do {
-                        let result = try await self.apiService.processText(
-                            text: text,
-                            action: .fixGrammar,
-                            targetLanguage: self.targetLanguage,
-                            provider: self.settingsManager.apiProvider,
-                            apiKey: self.settingsManager.currentAPIKey
-                        )
-                        
-                        await MainActor.run {
-                            print("✅ Grammar fixed successfully")
-                            self.suggestionText = result.processedText
-                            self.outputText = result.processedText
-                            self.changes = result.changes ?? []
-                            self.confidence = result.confidence
-                            self.isProcessingSuggestion = false
-                            
-                            // Show suggestion popup with "Fix Grammar" title
-                            self.showSuggestionPopup(suggestion: result.processedText, title: "Fix Grammar")
-                        }
-                    } catch {
-                        await MainActor.run {
-                            print("❌ Failed to fix grammar: \(error.localizedDescription)")
-                            self.isProcessingSuggestion = false
-                        }
-                    }
-                }
-            } else {
-                print("⚠️ No text captured from any supported app")
-            }
-        }
-        
-        // Handle close overlay
-        NotificationCenter.default.addObserver(
-            forName: .closeFloatingOverlay,
-            object: nil,
-            queue: .main
-        ) { _ in
-            print("❌ Close overlay triggered")
-            self.floatingOverlayManager.hideOverlay()
-        }
-    }
-    
-    private func showSuggestionPopup(suggestion: String, title: String = "Grammar Suggestion") {
-        print("💬 Showing suggestion popup with title: \(title)")
-        
-        // Close existing popup if any
-        suggestionPopup?.close()
-        
-        // Create popup window with dynamic title
-        let popup = SuggestionPopupWindow(title: title)
-        
-        // Create SwiftUI content with dynamic title
-        let content = SuggestionPopupContent(
-            title: title,
-            originalText: inputText,
-            suggestedText: suggestion,
-            onCopy: {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(suggestion, forType: .string)
-                print("📋 Copied to clipboard")
-            },
-            onClose: {
-                self.suggestionPopup?.close()
-                self.suggestionPopup = nil
-            }
-        )
-        
-        popup.contentView = NSHostingView(rootView: content)
-        
-        // Position popup near floating icon (center of screen for now)
-        if let screen = NSScreen.main {
-            let screenRect = screen.visibleFrame
-            let popupRect = popup.frame
-            let x = (screenRect.width - popupRect.width) / 2 + screenRect.origin.x
-            let y = (screenRect.height - popupRect.height) / 2 + screenRect.origin.y
-            popup.setFrameOrigin(CGPoint(x: x, y: y))
-        }
-        
-        popup.makeKeyAndOrderFront(nil)
-        suggestionPopup = popup
-    }
-    
-    private func autoShowOverlayWithRetry(attempt: Int = 1, maxAttempts: Int = 5) {
-        let delay: TimeInterval = Double(attempt) * 1.0 // 1s, 2s, 3s, 4s, 5s
-        
-        print("🔄 Auto-show overlay attempt \(attempt)/\(maxAttempts) - waiting \(delay)s...")
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            // Check if any supported app is running
-            let workspace = NSWorkspace.shared
-            let runningApps = workspace.runningApplications
-            
-            let teamsRunning = runningApps.contains { app in
-                app.bundleIdentifier == "com.microsoft.teams" || 
-                app.bundleIdentifier == "com.microsoft.teams2"
-            }
-            
-            let notesRunning = runningApps.contains { app in
-                app.bundleIdentifier == "com.apple.Notes"
-            }
-            
-            if !teamsRunning && !notesRunning {
-                print("⏭️ No supported apps running, skipping attempt \(attempt)")
-                if attempt < maxAttempts {
-                    self.autoShowOverlayWithRetry(attempt: attempt + 1, maxAttempts: maxAttempts)
-                } else {
-                    print("⏹️ Max attempts reached, giving up")
-                }
-                return
-            }
-            
-            // Try to show overlay
-            self.isScanningForOverlay = true
-            
-            DispatchQueue.global(qos: .userInitiated).async {
-                var foundTextArea: AccessibleElement?
-                
-                // Try Teams first
-                if teamsRunning {
-                    foundTextArea = self.accessibilityService.findTeamsComposeBox(maxDepth: 25)
-                }
-                
-                // Try Notes if Teams failed
-                if foundTextArea == nil && notesRunning {
-                    foundTextArea = self.accessibilityService.findNotesTextArea(maxDepth: 25)
-                }
-                
-                if let textArea = foundTextArea {
-                    DispatchQueue.main.async {
-                        print("✅ Auto-show successful on attempt \(attempt)!")
-                        self.floatingOverlayManager.showOverlay(for: textArea, accessibilityService: self.accessibilityService, settingsManager: self.settingsManager)
-                        self.isScanningForOverlay = false
-                    }
-                } else {
-                    DispatchQueue.main.async {
-                        print("❌ Attempt \(attempt) failed to find text area")
-                        self.isScanningForOverlay = false
-                        
-                        // Retry if not max attempts
-                        if attempt < maxAttempts {
-                            print("🔄 Will retry in \(attempt + 1) seconds...")
-                            self.autoShowOverlayWithRetry(attempt: attempt + 1, maxAttempts: maxAttempts)
-                        } else {
-                            print("⏹️ Max attempts reached. Use retry button to try manually.")
-                        }
-                    }
-                }
             }
         }
     }
@@ -777,14 +438,25 @@ private struct ChangeRow: View {
 }
 
 #Preview {
-    ContentView()
-        .environmentObject(SettingsManager())
-        .frame(width: 800, height: 600)
+    let settingsManager = SettingsManager()
+    let apiService = APIService()
+    let accessibilityService = AccessibilityService()
+    let floatingOverlayManager = FloatingOverlayManager()
+    let menuBarManager = MenuBarManager()
+    
+    return ContentView(
+        apiService: apiService,
+        accessibilityService: accessibilityService,
+        floatingOverlayManager: floatingOverlayManager,
+        settingsManager: settingsManager,
+        menuBarManager: menuBarManager
+    )
+    .frame(width: 800, height: 600)
 }
 
 // Teams Elements Viewer
 struct TeamsElementsViewer: View {
-    @ObservedObject var accessibilityService: AccessibilityService
+    @Bindable var accessibilityService: AccessibilityService
     @Binding var elements: [AccessibleElement]
     @Binding var isLoading: Bool
     @State private var searchText: String = ""

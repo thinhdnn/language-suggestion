@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import Observation
 
 // Supported apps for overlay
 enum SupportedApp: String {
@@ -24,8 +25,9 @@ enum SupportedApp: String {
 }
 
 // Floating overlay window manager
-class FloatingOverlayManager: ObservableObject {
-    @Published var isOverlayVisible: Bool = false
+@Observable
+final class FloatingOverlayManager {
+    var isOverlayVisible: Bool = false
     
     private var overlayWindow: FloatingOverlayWindow?
     private var monitorTimer: Timer?

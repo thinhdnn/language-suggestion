@@ -7,10 +7,12 @@
 
 import ApplicationServices
 import AppKit
+import Observation
 
-class AccessibilityService: ObservableObject {
-    @Published var lastError: String?
-    @Published var isAccessibilityEnabled: Bool = false
+@Observable
+final class AccessibilityService {
+    var lastError: String?
+    var isAccessibilityEnabled: Bool = false
     
     init() {
         checkAccessibilityPermission()

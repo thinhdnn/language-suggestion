@@ -219,19 +219,18 @@ class MenuBarManager: NSObject, ObservableObject {
             return
         }
         
-        let settingsView = SettingsView()
-            .environmentObject(settingsManager)
+        let settingsView = SettingsView(settingsManager: settingsManager)
         
         let hostingController = NSHostingController(rootView: settingsView)
         
         let window = NSWindow(contentViewController: hostingController)
         window.title = "Settings"
-        window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
+        window.styleMask = [NSWindow.StyleMask.titled, NSWindow.StyleMask.closable, NSWindow.StyleMask.resizable, NSWindow.StyleMask.miniaturizable]
         window.setContentSize(NSSize(width: 700, height: 600))
         window.center()
         window.isReleasedWhenClosed = false
-        window.level = .normal
-        window.collectionBehavior = [.managed]
+        window.level = NSWindow.Level.normal
+        window.collectionBehavior = [NSWindow.CollectionBehavior.managed]
         
         // Handle window close
         window.delegate = self

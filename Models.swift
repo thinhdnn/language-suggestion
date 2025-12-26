@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Observation
 
 // API Provider enum
 enum APIProvider: String, CaseIterable, Codable {
@@ -52,14 +53,15 @@ struct TextChange: Codable {
 }
 
 // Settings Model
-class SettingsManager: ObservableObject {
-    @Published var apiProvider: APIProvider = .openai
-    @Published var openAIKey: String = ""
-    @Published var openRouterKey: String = ""
-    @Published var geminiKey: String = ""
-    @Published var defaultAction: ActionType = .fixGrammar
-    @Published var targetLanguage: String = "English"
-    @Published var customPrompts: [CustomPrompt] = []
+@Observable
+final class SettingsManager {
+    var apiProvider: APIProvider = .openai
+    var openAIKey: String = ""
+    var openRouterKey: String = ""
+    var geminiKey: String = ""
+    var defaultAction: ActionType = .fixGrammar
+    var targetLanguage: String = "English"
+    var customPrompts: [CustomPrompt] = []
     
     private let userDefaults = UserDefaults.standard
     

@@ -8,8 +8,8 @@
 import SwiftUI
 
 struct OnboardingGuideView: View {
-    @EnvironmentObject var settingsManager: SettingsManager
-    @ObservedObject var accessibilityService: AccessibilityService
+    @Bindable var settingsManager: SettingsManager
+    @Bindable var accessibilityService: AccessibilityService
     
     @State private var currentStep: OnboardingStep = .welcome
     @State private var openAIKey: String = ""
@@ -87,7 +87,8 @@ struct OnboardingGuideView: View {
                 }
             }
         }
-        .onChange(of: accessibilityService.isAccessibilityEnabled) { enabled in
+        .onChange(of: accessibilityService.isAccessibilityEnabled) { oldValue, newValue in
+            let enabled = newValue
             if enabled && currentStep == .accessibility {
                 // Auto-advance when permission is granted
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -95,13 +96,15 @@ struct OnboardingGuideView: View {
                 }
             }
         }
-        .onChange(of: currentStep) { newStep in
+        .onChange(of: currentStep) { oldValue, newValue in
+            let newStep = newValue
             // Check permission immediately when switching to accessibility step
             if newStep == .accessibility {
                 accessibilityService.checkAccessibilityPermission()
             }
         }
-        .onChange(of: settingsManager.currentAPIKey) { key in
+        .onChange(of: settingsManager.currentAPIKey) { oldValue, newValue in
+            let key = newValue
             if !key.isEmpty && currentStep == .apiKey {
                 showKeySaved = true
                 // Auto-advance after a moment
@@ -203,7 +206,7 @@ struct OnboardingGuideView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .onChange(of: selectedProvider) { _ in
+                .onChange(of: selectedProvider) { oldValue, newValue in
                     loadCurrentKeys()
                 }
                 

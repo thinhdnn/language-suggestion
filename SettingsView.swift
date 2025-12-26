@@ -8,17 +8,13 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @EnvironmentObject var settingsManager: SettingsManager
-    
-    @State private var openAIKey: String = ""
-    @State private var openRouterKey: String = ""
-    @State private var geminiKey: String = ""
-    @State private var apiProvider: APIProvider = .openai
-    @State private var defaultAction: ActionType = .fixGrammar
-    @State private var targetLanguage: String = "English"
-    @State private var showSaveConfirmation = false
+    @Bindable var viewModel: SettingsViewModel
     @State private var showAddPromptSheet = false
     @State private var editingPrompt: CustomPrompt?
+    
+    init(settingsManager: SettingsManager) {
+        self.viewModel = SettingsViewModel(settingsManager: settingsManager)
+    }
     
     var body: some View {
         ZStack(alignment: .top) {
@@ -39,10 +35,7 @@ struct SettingsView: View {
             .padding(16)
         }
         .frame(width: 700, height: 600)
-        .onAppear {
-            loadSettings()
-        }
-        .alert("Settings Saved", isPresented: $showSaveConfirmation) {
+        .alert("Settings Saved", isPresented: $viewModel.showSaveConfirmation) {
             Button("OK") {}
         } message: {
             Text("Your settings have been saved successfully.")
@@ -50,7 +43,7 @@ struct SettingsView: View {
         .sheet(isPresented: $showAddPromptSheet, onDismiss: {
             editingPrompt = nil
         }) {
-            AddCustomPromptView(settingsManager: settingsManager, editingPrompt: editingPrompt) {
+            AddCustomPromptView(viewModel: viewModel, editingPrompt: editingPrompt) {
                 editingPrompt = nil
             }
             .interactiveDismissDisabled(false)
@@ -67,7 +60,7 @@ struct SettingsView: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
-            if showSaveConfirmation {
+            if viewModel.showSaveConfirmation {
                 Label("Saved", systemImage: "checkmark.seal.fill")
                     .foregroundColor(.green)
                     .font(.subheadline)
@@ -96,7 +89,7 @@ struct SettingsView: View {
     
     private var providerSection: some View {
         Section {
-            Picker("API Provider", selection: $apiProvider) {
+            Picker("API Provider", selection: $viewModel.apiProvider) {
                 ForEach(APIProvider.allCases, id: \.self) { provider in
                     Text(provider.rawValue).tag(provider)
                 }
@@ -110,35 +103,35 @@ struct SettingsView: View {
     
     private var apiKeySection: some View {
         Section {
-            if apiProvider == .openai {
-                SecureField("OpenAI API Key", text: $openAIKey)
+            if viewModel.apiProvider == .openai {
+                SecureField("OpenAI API Key", text: $viewModel.openAIKey)
                     .textContentType(.password)
                     .disableAutocorrection(true)
-            } else if apiProvider == .openrouter {
-                SecureField("OpenRouter API Key", text: $openRouterKey)
+            } else if viewModel.apiProvider == .openrouter {
+                SecureField("OpenRouter API Key", text: $viewModel.openRouterKey)
                     .textContentType(.password)
                     .disableAutocorrection(true)
-            } else if apiProvider == .gemini {
-                SecureField("Gemini API Key", text: $geminiKey)
+            } else if viewModel.apiProvider == .gemini {
+                SecureField("Gemini API Key", text: $viewModel.geminiKey)
                     .textContentType(.password)
                     .disableAutocorrection(true)
             }
         } header: {
             Text("API Key")
         } footer: {
-            Text(apiProvider == .openai ? "OpenAI key is used when provider is OpenAI." : apiProvider == .openrouter ? "OpenRouter key is used when provider is OpenRouter." : "Gemini key is used when provider is Gemini.")
+            Text(viewModel.apiProvider == .openai ? "OpenAI key is used when provider is OpenAI." : viewModel.apiProvider == .openrouter ? "OpenRouter key is used when provider is OpenRouter." : "Gemini key is used when provider is Gemini.")
         }
     }
     
     private var defaultsSection: some View {
         Section {
-            Picker("Default Action", selection: $defaultAction) {
+            Picker("Default Action", selection: $viewModel.defaultAction) {
                 ForEach(ActionType.allCases, id: \.self) { action in
                     Text(action.rawValue).tag(action)
                 }
             }
             
-            TextField("Default Target Language", text: $targetLanguage)
+            TextField("Default Target Language", text: $viewModel.targetLanguage)
                 .help("Used when translating text")
         } header: {
             Text("Defaults")
@@ -156,11 +149,18 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                     Spacer()
                     Button(action: {
-                        settingsManager.restoreDefaultPrompts()
+                        viewModel.restoreDefaultPrompts()
                     }) {
                         Label("Restore Defaults", systemImage: "arrow.counterclockwise")
                     }
                     .help("Restore the 3 default prompts")
+                    .onHover { inside in
+                        if inside {
+                            NSCursor.pointingHand.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
                     
                     Button(action: {
                         editingPrompt = nil
@@ -168,16 +168,23 @@ struct SettingsView: View {
                     }) {
                         Label("Add", systemImage: "plus.circle.fill")
                     }
+                    .onHover { inside in
+                        if inside {
+                            NSCursor.pointingHand.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
                 }
                 
-                if settingsManager.customPrompts.isEmpty {
+                if viewModel.customPrompts.isEmpty {
                     Text("No custom prompts yet. Add one to get started!")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .padding(.vertical, 8)
                 } else {
                     List {
-                        ForEach(settingsManager.customPrompts) { prompt in
+                        ForEach(viewModel.customPrompts) { prompt in
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(prompt.name)
@@ -215,7 +222,7 @@ struct SettingsView: View {
                             .padding(.vertical, 4)
                         }
                         .onDelete { offsets in
-                            settingsManager.deleteCustomPrompt(at: offsets)
+                            viewModel.deleteCustomPrompt(at: offsets)
                         }
                     }
                     .frame(minHeight: 150, maxHeight: 200)
@@ -231,37 +238,24 @@ struct SettingsView: View {
     private var saveSection: some View {
         Section {
             Button("Save Settings") {
-                saveSettings()
+                viewModel.saveSettings()
             }
             .buttonStyle(.borderedProminent)
             .frame(maxWidth: .infinity, alignment: .center)
+            .onHover { inside in
+                if inside {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
         }
-    }
-    
-    private func loadSettings() {
-        openAIKey = settingsManager.openAIKey
-        openRouterKey = settingsManager.openRouterKey
-        geminiKey = settingsManager.geminiKey
-        apiProvider = settingsManager.apiProvider
-        defaultAction = settingsManager.defaultAction
-        targetLanguage = settingsManager.targetLanguage
-    }
-    
-    private func saveSettings() {
-        settingsManager.openAIKey = openAIKey
-        settingsManager.openRouterKey = openRouterKey
-        settingsManager.geminiKey = geminiKey
-        settingsManager.apiProvider = apiProvider
-        settingsManager.defaultAction = defaultAction
-        settingsManager.targetLanguage = targetLanguage
-        settingsManager.saveSettings()
-        showSaveConfirmation = true
     }
 }
 
 // MARK: - Add/Edit Custom Prompt View
 struct AddCustomPromptView: View {
-    @ObservedObject var settingsManager: SettingsManager
+    @Bindable var viewModel: SettingsViewModel
     var editingPrompt: CustomPrompt?
     var onDismiss: () -> Void
     
@@ -331,22 +325,20 @@ struct AddCustomPromptView: View {
     
     private func savePrompt() {
         if let editing = editingPrompt {
-            // Update existing prompt
             let updated = CustomPrompt(
                 id: editing.id,
                 name: name,
                 prompt: prompt,
                 keyEquivalent: keyEquivalent
             )
-            settingsManager.updateCustomPrompt(updated)
+            viewModel.updateCustomPrompt(updated)
         } else {
-            // Add new prompt
             let newPrompt = CustomPrompt(
                 name: name,
                 prompt: prompt,
                 keyEquivalent: keyEquivalent
             )
-            settingsManager.addCustomPrompt(newPrompt)
+            viewModel.addCustomPrompt(newPrompt)
         }
         onDismiss()
         dismiss()
@@ -354,7 +346,6 @@ struct AddCustomPromptView: View {
 }
 
 #Preview {
-    SettingsView()
-        .environmentObject(SettingsManager())
+    SettingsView(settingsManager: SettingsManager())
 }
 
