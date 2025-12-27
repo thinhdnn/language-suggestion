@@ -63,7 +63,13 @@ final class SettingsManager {
     var targetLanguage: String = "English"
     var customPrompts: [CustomPrompt] = []
     
-    private let userDefaults = UserDefaults.standard
+    private let userDefaults: UserDefaults
+    
+    // Initializer with dependency injection for testing
+    init(userDefaults: UserDefaults = UserDefaults.standard) {
+        self.userDefaults = userDefaults
+        loadSettings()
+    }
     
     // Computed property to get current API key based on provider
     var currentAPIKey: String {
@@ -75,10 +81,6 @@ final class SettingsManager {
         case .gemini:
             return geminiKey
         }
-    }
-    
-    init() {
-        loadSettings()
     }
     
     func saveSettings() {
