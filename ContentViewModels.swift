@@ -181,12 +181,38 @@ final class ContentViewModel {
             return
         }
         
+        // Check which app is currently active/frontmost
+        let activeApp = workspace.frontmostApplication
+        let activeBundleId = activeApp?.bundleIdentifier ?? ""
+        
+        let isTeamsActive = activeBundleId == "com.microsoft.teams" || activeBundleId == "com.microsoft.teams2"
+        let isNotesActive = activeBundleId == "com.apple.Notes"
+        
+        print("🔍 Active app: \(activeBundleId)")
+        
         isScanningForOverlay = true
         
         Task.detached(priority: .userInitiated) {
-            if teamsRunning {
-                print("🔍 Scanning for Teams compose box (depth: 25)...")
-                if let composeBox = self.accessibilityService.findTeamsComposeBox(maxDepth: 25) {
+            // Prioritize the currently active app
+            if isNotesActive && notesRunning {
+                print("🔍 Scanning for Notes text area (depth: 30)...")
+                if let notesTextArea = self.accessibilityService.findNotesTextArea(maxDepth: 30) {
+                    await MainActor.run {
+                        print("✅ Found Notes text area, showing overlay")
+                        self.floatingOverlayManager.showOverlay(
+                            for: notesTextArea,
+                            accessibilityService: self.accessibilityService,
+                            settingsManager: self.settingsManager
+                        )
+                        self.isScanningForOverlay = false
+                    }
+                    return
+                }
+            }
+            
+            if isTeamsActive && teamsRunning {
+                print("🔍 Scanning for Teams compose box (depth: 30)...")
+                if let composeBox = self.accessibilityService.findTeamsComposeBox(maxDepth: 30) {
                     await MainActor.run {
                         print("✅ Found Teams compose box, showing overlay")
                         self.floatingOverlayManager.showOverlay(
@@ -200,9 +226,27 @@ final class ContentViewModel {
                 }
             }
             
-            if notesRunning {
-                print("🔍 Scanning for Notes text area (depth: 25)...")
-                if let notesTextArea = self.accessibilityService.findNotesTextArea(maxDepth: 25) {
+            // Fallback: try Teams if not active app found
+            if teamsRunning && !isNotesActive {
+                print("🔍 Scanning for Teams compose box (depth: 30)...")
+                if let composeBox = self.accessibilityService.findTeamsComposeBox(maxDepth: 30) {
+                    await MainActor.run {
+                        print("✅ Found Teams compose box, showing overlay")
+                        self.floatingOverlayManager.showOverlay(
+                            for: composeBox,
+                            accessibilityService: self.accessibilityService,
+                            settingsManager: self.settingsManager
+                        )
+                        self.isScanningForOverlay = false
+                    }
+                    return
+                }
+            }
+            
+            // Fallback: try Notes if not active app found
+            if notesRunning && !isTeamsActive {
+                print("🔍 Scanning for Notes text area (depth: 30)...")
+                if let notesTextArea = self.accessibilityService.findNotesTextArea(maxDepth: 30) {
                     await MainActor.run {
                         print("✅ Found Notes text area, showing overlay")
                         self.floatingOverlayManager.showOverlay(
@@ -392,15 +436,32 @@ final class ContentViewModel {
             
             isScanningForOverlay = true
             
+            // Check which app is currently active/frontmost
+            let activeApp = workspace.frontmostApplication
+            let activeBundleId = activeApp?.bundleIdentifier ?? ""
+            let isTeamsActive = activeBundleId == "com.microsoft.teams" || activeBundleId == "com.microsoft.teams2"
+            let isNotesActive = activeBundleId == "com.apple.Notes"
+            
             Task.detached(priority: .userInitiated) {
                 var foundTextArea: AccessibleElement?
                 
-                if teamsRunning {
-                    foundTextArea = self.accessibilityService.findTeamsComposeBox(maxDepth: 25)
+                // Prioritize the currently active app
+                if isNotesActive && notesRunning {
+                    foundTextArea = self.accessibilityService.findNotesTextArea(maxDepth: 30)
                 }
                 
-                if foundTextArea == nil && notesRunning {
-                    foundTextArea = self.accessibilityService.findNotesTextArea(maxDepth: 25)
+                if foundTextArea == nil && isTeamsActive && teamsRunning {
+                    foundTextArea = self.accessibilityService.findTeamsComposeBox(maxDepth: 30)
+                }
+                
+                // Fallback: try Teams if no active app found
+                if foundTextArea == nil && teamsRunning && !isNotesActive {
+                    foundTextArea = self.accessibilityService.findTeamsComposeBox(maxDepth: 30)
+                }
+                
+                // Fallback: try Notes if no active app found
+                if foundTextArea == nil && notesRunning && !isTeamsActive {
+                    foundTextArea = self.accessibilityService.findNotesTextArea(maxDepth: 30)
                 }
                 
                 if let textArea = foundTextArea {

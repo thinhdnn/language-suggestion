@@ -20,6 +20,7 @@ BUILD_DIR="build"
 RUN_ONLY=false
 SKIP_TESTS=false
 TEST_ONLY=false
+INCREMENTAL=false  # Skip clean for incremental builds
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -35,9 +36,19 @@ while [[ $# -gt 0 ]]; do
             TEST_ONLY=true
             shift
             ;;
+        -i|--incremental)
+            INCREMENTAL=true
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: ./build.sh [-r|--run-only] [-s|--skip-tests] [-t|--test-only]"
+            echo "Usage: ./build.sh [-r|--run-only] [-s|--skip-tests] [-t|--test-only] [-i|--incremental]"
+            echo ""
+            echo "Options:"
+            echo "  -r, --run-only      Only run/open the app without building"
+            echo "  -s, --skip-tests   Build without running tests"
+            echo "  -t, --test-only    Only run tests (skip build and launch)"
+            echo "  -i, --incremental  Skip clean (keeps accessibility permissions)"
             exit 1
             ;;
     esac
@@ -58,8 +69,8 @@ run_tests() {
         -derivedDataPath "$BUILD_DIR" \
         ARCHS=arm64 \
         ONLY_ACTIVE_ARCH=YES \
-        CODE_SIGN_IDENTITY="" \
-        CODE_SIGNING_REQUIRED=NO 2>&1 | tee /tmp/xcodebuild_test.log; then
+        CODE_SIGN_IDENTITY="-" \
+        CODE_SIGNING_REQUIRED=YES 2>&1 | tee /tmp/xcodebuild_test.log; then
         echo ""
         echo "✅ All tests passed!"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -87,22 +98,33 @@ if [ "$TEST_ONLY" = true ]; then
 fi
 
 if [ "$RUN_ONLY" = false ]; then
-    echo "🧹 Cleaning build folder..."
-    rm -rf "$BUILD_DIR"
-    rm -rf ~/Library/Developer/Xcode/DerivedData/${PROJECT_NAME}-*
+    if [ "$INCREMENTAL" = false ]; then
+        echo "🧹 Cleaning build folder..."
+        rm -rf "$BUILD_DIR"
+        rm -rf ~/Library/Developer/Xcode/DerivedData/${PROJECT_NAME}-*
+    else
+        echo "🔄 Incremental build (skipping clean to preserve permissions)..."
+    fi
 
     echo "🔨 Building project..."
+    # Use ad-hoc code signing to maintain stable identity for permissions
+    # "-" means ad-hoc signing (self-signed, but consistent)
+    BUILD_COMMAND="build"
+    if [ "$INCREMENTAL" = false ]; then
+        BUILD_COMMAND="clean build"
+    fi
+    
     if ! xcodebuild \
         -project "${PROJECT_NAME}.xcodeproj" \
         -scheme "${SCHEME_NAME}" \
         -configuration "${CONFIGURATION}" \
-        clean build \
+        $BUILD_COMMAND \
         -destination 'platform=macOS,arch=arm64' \
         -derivedDataPath "$BUILD_DIR" \
         ARCHS=arm64 \
         ONLY_ACTIVE_ARCH=YES \
-        CODE_SIGN_IDENTITY="" \
-        CODE_SIGNING_REQUIRED=NO; then
+        CODE_SIGN_IDENTITY="-" \
+        CODE_SIGNING_REQUIRED=YES; then
         echo "❌ Build failed!"
         exit 1
     fi
@@ -118,6 +140,15 @@ if [ "$RUN_ONLY" = false ]; then
     echo ""
     echo "✅ Build successful!"
     echo "📦 App location: $APP_PATH"
+    
+    if [ "$INCREMENTAL" = true ]; then
+        echo ""
+        echo "💡 Incremental build: Accessibility permissions should be preserved"
+    else
+        echo ""
+        echo "⚠️  Full clean build: You may need to grant accessibility permissions again"
+        echo "   Use -i flag for incremental builds: ./build.sh -i"
+    fi
     
     # Run tests if not skipped
     if [ "$SKIP_TESTS" = false ]; then

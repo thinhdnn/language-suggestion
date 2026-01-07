@@ -82,17 +82,26 @@ struct OnboardingGuideView: View {
             // Periodically check accessibility permission when on accessibility step
             if currentStep == .accessibility {
                 while currentStep == .accessibility {
-                    accessibilityService.checkAccessibilityPermission()
-                    try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                    // Check permission more frequently
+                    await MainActor.run {
+                        _ = accessibilityService.checkAccessibilityPermission()
+                    }
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds for faster detection
                 }
             }
         }
         .onChange(of: accessibilityService.isAccessibilityEnabled) { oldValue, newValue in
             let enabled = newValue
+            print("🔄 Accessibility permission changed: \(oldValue) -> \(newValue), currentStep: \(currentStep)")
             if enabled && currentStep == .accessibility {
                 // Auto-advance when permission is granted
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    currentStep = .complete
+                // Add a small delay to ensure state is stable
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    // Double-check before advancing
+                    if accessibilityService.isAccessibilityEnabled {
+                        print("✅ Permission granted, advancing to complete step")
+                        currentStep = .complete
+                    }
                 }
             }
         }
@@ -100,7 +109,13 @@ struct OnboardingGuideView: View {
             let newStep = newValue
             // Check permission immediately when switching to accessibility step
             if newStep == .accessibility {
-                accessibilityService.checkAccessibilityPermission()
+                print("📍 Switched to accessibility step, checking permission...")
+                // Check immediately
+                _ = accessibilityService.checkAccessibilityPermission()
+                // Also check again after a short delay to catch any delayed updates
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    _ = accessibilityService.checkAccessibilityPermission()
+                }
             }
         }
         .onChange(of: settingsManager.currentAPIKey) { oldValue, newValue in
@@ -393,7 +408,26 @@ struct OnboardingGuideView: View {
             } else if currentStep == .accessibility && !accessibilityService.isAccessibilityEnabled {
                 HStack(spacing: 12) {
                     Button("Check Again") {
-                        accessibilityService.checkAccessibilityPermission()
+                        // Force multiple checks with delays to catch delayed macOS updates
+                        // macOS sometimes needs a moment to update trust status after granting permission
+                        Task {
+                            // First check immediately
+                            await MainActor.run {
+                                _ = accessibilityService.checkAccessibilityPermission()
+                            }
+                            
+                            // Wait a bit and check again
+                            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+                            await MainActor.run {
+                                _ = accessibilityService.checkAccessibilityPermission()
+                            }
+                            
+                            // One more check after a bit longer
+                            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                            await MainActor.run {
+                                _ = accessibilityService.checkAccessibilityPermission()
+                            }
+                        }
                     }
                     .buttonStyle(.bordered)
                     

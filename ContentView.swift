@@ -187,6 +187,29 @@ struct ContentView: View {
                 }
             }
             
+            // Show overlay button (always visible)
+            Button(action: {
+                viewModel.showOverlay()
+            }) {
+                Image(systemName: viewModel.floatingOverlayManager.isOverlayVisible ? "eye.slash.fill" : "eye.fill")
+                    .font(.title3)
+                    .foregroundColor(viewModel.floatingOverlayManager.isOverlayVisible ? .green : .blue)
+                    .padding(8)
+                    .background(
+                        Circle()
+                            .fill((viewModel.floatingOverlayManager.isOverlayVisible ? Color.green : Color.blue).opacity(0.1))
+                    )
+            }
+            .buttonStyle(.plain)
+            .help(viewModel.floatingOverlayManager.isOverlayVisible ? "Hide Overlay" : "Show Overlay on Teams/Notes")
+            .onHover { inside in
+                if inside {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            
             // Settings button
             Button(action: {
                 viewModel.openSettings()

@@ -14,16 +14,29 @@ final class AccessibilityService {
     var lastError: String?
     var isAccessibilityEnabled: Bool = false
     
+    // Use NSLog for debug logs so they always appear in Console.app
+    private func debugLog(_ message: String) {
+        NSLog("%@", "[AccessibilityService] \(message)")
+    }
+    
     init() {
         checkAccessibilityPermission()
     }
     
     // Check if accessibility permission is granted (without prompting)
     func checkAccessibilityPermission() -> Bool {
+        // Check permission status
         let accessEnabled = AXIsProcessTrusted()
         
+        // Update state on main thread
         DispatchQueue.main.async {
+            let oldValue = self.isAccessibilityEnabled
             self.isAccessibilityEnabled = accessEnabled
+            
+            // Log state change for debugging
+            if oldValue != accessEnabled {
+                self.debugLog("🔐 Accessibility permission status changed: \(oldValue) -> \(accessEnabled)")
+            }
         }
         
         return accessEnabled
@@ -265,20 +278,52 @@ final class AccessibilityService {
     
     // Get all visible elements from Teams with detailed information
     func getAllTeamsElements(maxDepth: Int = 10) -> [AccessibleElement] {
+        debugLog("🔍 getAllTeamsElements called with maxDepth: \(maxDepth)")
+        
         guard checkAccessibilityPermission() else {
             lastError = "Accessibility permission not granted."
+            debugLog("❌ Accessibility permission not granted")
             return []
         }
         
         guard let teamsApp = findApplication(bundleIdentifier: "com.microsoft.teams2") ?? 
                             findApplication(bundleIdentifier: "com.microsoft.teams") else {
             lastError = "Microsoft Teams is not running."
+            debugLog("❌ Microsoft Teams is not running")
             return []
         }
         
         var allElements: [AccessibleElement] = []
-        collectElements(from: teamsApp, depth: 0, maxDepth: maxDepth, elements: &allElements)
         
+        // Try to get focused window first (more efficient)
+        var focusedWindowValue: CFTypeRef?
+        let focusedWindowResult = AXUIElementCopyAttributeValue(teamsApp, kAXFocusedWindowAttribute as CFString, &focusedWindowValue)
+        
+        if focusedWindowResult == .success, let focusedWindowCF = focusedWindowValue {
+            let focusedWindow = focusedWindowCF as! AXUIElement
+            debugLog("✅ Found focused window, scanning from focused window")
+            collectElements(from: focusedWindow, depth: 0, maxDepth: maxDepth, elements: &allElements)
+            debugLog("📊 Found \(allElements.count) elements from focused window")
+        } else {
+            debugLog("⚠️ No focused window, scanning all windows")
+            
+            // Fallback: scan all windows
+            var windowsValue: CFTypeRef?
+            let windowsResult = AXUIElementCopyAttributeValue(teamsApp, kAXWindowsAttribute as CFString, &windowsValue)
+            
+            if windowsResult == .success, let windows = windowsValue as? [AXUIElement] {
+                debugLog("📊 Found \(windows.count) windows")
+                for (index, window) in windows.enumerated() {
+                    debugLog("   Scanning window \(index + 1)/\(windows.count)")
+                    collectElements(from: window, depth: 0, maxDepth: maxDepth, elements: &allElements)
+                }
+            } else {
+                debugLog("⚠️ Could not get windows, scanning from app level")
+                collectElements(from: teamsApp, depth: 0, maxDepth: maxDepth, elements: &allElements)
+            }
+        }
+        
+        debugLog("✅ Total elements collected: \(allElements.count)")
         return allElements
     }
     
@@ -291,6 +336,11 @@ final class AccessibilityService {
         let elementInfo = getElementInfo(element, depth: depth)
         elements.append(elementInfo)
         
+        // Log AXTextArea elements found (for debugging)
+        if elementInfo.role == "AXTextArea" {
+            debugLog("   Found AXTextArea at depth \(depth): pos=\(elementInfo.position?.debugDescription ?? "nil"), size=\(elementInfo.size?.debugDescription ?? "nil"), title=\(elementInfo.title ?? "nil")")
+        }
+        
         // Get children
         var childrenValue: CFTypeRef?
         let childrenResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenValue)
@@ -299,6 +349,9 @@ final class AccessibilityService {
             for child in children {
                 collectElements(from: child, depth: depth + 1, maxDepth: maxDepth, elements: &elements)
             }
+        } else if depth == 0 {
+            // Log if we can't get children at root level
+            debugLog("⚠️ Could not get children at depth 0, result: \(childrenResult)")
         }
     }
     
@@ -406,25 +459,41 @@ final class AccessibilityService {
     
     // Find Teams compose box specifically with multiple strategies
     func findTeamsComposeBox(maxDepth: Int = 25) -> AccessibleElement? {
-        print("🔍 Finding Teams compose box (maxDepth: \(maxDepth))")
+        debugLog("🔍 Finding Teams compose box (maxDepth: \(maxDepth))")
+        debugLog(String(repeating: "=", count: 60))
         
         guard checkAccessibilityPermission() else {
             lastError = "Accessibility permission not granted."
+            debugLog("❌ Accessibility permission not granted")
             return nil
         }
         
         // Get all AXTextArea elements from Teams
         let textAreas = getTeamsElementsByRole("AXTextArea", maxDepth: maxDepth)
-        print("📊 Found \(textAreas.count) AXTextArea elements")
+        debugLog("📊 Found \(textAreas.count) AXTextArea elements")
         
-        if textAreas.isEmpty {
-            print("❌ No AXTextArea found")
+        // Also check AXTextField (Teams might use either)
+        let textFields = getTeamsElementsByRole("AXTextField", maxDepth: maxDepth)
+        debugLog("📊 Found \(textFields.count) AXTextField elements")
+        
+        // Combine both types
+        let allTextElements = textAreas + textFields
+        debugLog("📊 Total text elements: \(allTextElements.count)")
+        
+        if allTextElements.isEmpty {
+            debugLog("❌ No text elements (AXTextArea or AXTextField) found")
+            debugLog("💡 Make sure:")
+            debugLog("   1. Teams is running")
+            debugLog("   2. A chat/conversation is open")
+            debugLog("   3. Click in the compose box")
+            debugLog(String(repeating: "=", count: 60))
             return nil
         }
         
         // Strategy 1: Look for keywords in title, value, or description
-        let keywords = ["type a message", "compose", "message-editor", "ck-editor", "ckeditor"]
-        for textArea in textAreas {
+        let keywords = ["type a message", "compose", "message-editor", "ck-editor", "ckeditor", "message", "type"]
+        debugLog("🎯 Strategy 1: Searching for keywords: \(keywords.joined(separator: ", "))")
+        for textArea in allTextElements {
             let title = textArea.title?.lowercased() ?? ""
             let value = textArea.value?.lowercased() ?? ""
             let desc = textArea.elementDescription?.lowercased() ?? ""
@@ -435,43 +504,54 @@ final class AccessibilityService {
                    value.contains(keyword) || 
                    desc.contains(keyword) ||
                    identifier.contains(keyword) {
-                    print("✅ Found compose box by keyword '\(keyword)'")
-                    print("   Title: \(textArea.title ?? "nil")")
-                    print("   Position: \(textArea.position?.debugDescription ?? "nil")")
-                    print("   Size: \(textArea.size?.debugDescription ?? "nil")")
+                    debugLog("✅ Found compose box by keyword '\(keyword)'")
+                    debugLog("   Title: \(textArea.title ?? "nil")")
+                    debugLog("   Position: \(textArea.position?.debugDescription ?? "nil")")
+                    debugLog("   Size: \(textArea.size?.debugDescription ?? "nil")")
                     return textArea
                 }
             }
         }
         
-        print("⚠️ No compose box found by keyword, trying focus detection...")
+        debugLog("⚠️ No compose box found by keyword, trying focus detection...")
         
         // Strategy 2: Look for focused text area
-        for textArea in textAreas {
+        debugLog("🎯 Strategy 2: Looking for focused text element...")
+        for textArea in allTextElements {
             if textArea.focused {
-                print("✅ Found compose box by focus")
-                print("   Title: \(textArea.title ?? "nil")")
-                print("   Position: \(textArea.position?.debugDescription ?? "nil")")
-                print("   Size: \(textArea.size?.debugDescription ?? "nil")")
+                debugLog("✅ Found compose box by focus")
+                debugLog("   Title: \(textArea.title ?? "nil")")
+                debugLog("   Position: \(textArea.position?.debugDescription ?? "nil")")
+                debugLog("   Size: \(textArea.size?.debugDescription ?? "nil")")
                 return textArea
             }
         }
         
-        print("⚠️ No focused text area, using largest text area as fallback...")
+        debugLog("⚠️ No focused text area, using largest text element as fallback...")
         
-        // Strategy 3: Fallback - use the largest text area (compose box is usually large)
-        let sortedBySize = textAreas
+        // Strategy 3: Fallback - use the largest text element (compose box is usually large)
+        debugLog("🎯 Strategy 3: Using largest text element as fallback...")
+        let sortedBySize = allTextElements
             .filter { $0.size != nil }
             .sorted { ($0.size!.width * $0.size!.height) > ($1.size!.width * $1.size!.height) }
         
         if let largest = sortedBySize.first {
-            print("✅ Using largest text area as compose box")
-            print("   Size: \(largest.size?.width ?? 0) x \(largest.size?.height ?? 0)")
-            print("   Position: \(largest.position?.debugDescription ?? "nil")")
+            debugLog("✅ Using largest text element as compose box")
+            debugLog("   Role: \(largest.role)")
+            debugLog("   Size: \(largest.size?.width ?? 0) x \(largest.size?.height ?? 0)")
+            debugLog("   Position: \(largest.position?.debugDescription ?? "nil")")
+            debugLog("   Title: \(largest.title ?? "nil")")
+            debugLog(String(repeating: "=", count: 60))
             return largest
         }
         
-        print("❌ Could not determine compose box")
+        debugLog("❌ Could not determine compose box")
+        debugLog("💡 Debug info:")
+        debugLog("   - Total elements scanned: \(allTextElements.count)")
+        for (index, element) in allTextElements.prefix(5).enumerated() {
+            debugLog("   Element \(index + 1): role=\(element.role), size=\(element.size?.debugDescription ?? "nil"), title=\(element.title ?? "nil")")
+        }
+        debugLog(String(repeating: "=", count: 60))
         return nil
     }
     
@@ -503,8 +583,8 @@ final class AccessibilityService {
     
     // Find Notes text area (where user writes notes)
     func findNotesTextArea(maxDepth: Int = 25) -> AccessibleElement? {
-        print("🔍 Finding Notes text area (maxDepth: \(maxDepth))")
-        print(String(repeating: "=", count: 60))
+        debugLog("🔍 Finding Notes text area (maxDepth: \(maxDepth))")
+        debugLog(String(repeating: "=", count: 60))
         
         guard checkAccessibilityPermission() else {
             lastError = "Accessibility permission not granted."
@@ -512,10 +592,10 @@ final class AccessibilityService {
         }
         
         // Get ALL elements from Notes for detailed analysis
-        print("📋 Scanning ALL Notes UI elements...")
+        debugLog("📋 Scanning ALL Notes UI elements...")
         let allElements = getAllNotesElements(maxDepth: maxDepth)
-        print("📊 Total elements found: \(allElements.count)")
-        print(String(repeating: "=", count: 60))
+        debugLog("📊 Total elements found: \(allElements.count)")
+        debugLog(String(repeating: "=", count: 60))
         
         // Log element type distribution
         var roleCount: [String: Int] = [:]
@@ -523,73 +603,73 @@ final class AccessibilityService {
             roleCount[element.role, default: 0] += 1
         }
         
-        print("📊 Element distribution by role:")
+        debugLog("📊 Element distribution by role:")
         for (role, count) in roleCount.sorted(by: { $0.value > $1.value }) {
-            print("   - \(role): \(count)")
+            debugLog("   - \(role): \(count)")
         }
-        print(String(repeating: "=", count: 60))
+        debugLog(String(repeating: "=", count: 60))
         
         // Get all text areas from Notes
         let textAreas = allElements.filter { $0.role == "AXTextArea" }
-        print("📊 Found \(textAreas.count) AXTextArea elements in Notes:")
+        debugLog("📊 Found \(textAreas.count) AXTextArea elements in Notes:")
         for (index, textArea) in textAreas.enumerated() {
-            print("\n   TextArea #\(index + 1):")
-            print("     - Title: \(textArea.title ?? "nil")")
-            print("     - Value: \(textArea.value?.prefix(50) ?? "nil")")
-            print("     - Identifier: \(textArea.identifier ?? "nil")")
-            print("     - Position: \(textArea.position?.debugDescription ?? "nil")")
-            print("     - Size: \(textArea.size?.debugDescription ?? "nil")")
-            print("     - Depth: \(textArea.depth)")
-            print("     - Focused: \(textArea.focused)")
-            print("     - Enabled: \(textArea.enabled)")
+            debugLog("   TextArea #\(index + 1):")
+            debugLog("     - Title: \(textArea.title ?? "nil")")
+            debugLog("     - Value: \(textArea.value?.prefix(50) ?? "nil")")
+            debugLog("     - Identifier: \(textArea.identifier ?? "nil")")
+            debugLog("     - Position: \(textArea.position?.debugDescription ?? "nil")")
+            debugLog("     - Size: \(textArea.size?.debugDescription ?? "nil")")
+            debugLog("     - Depth: \(textArea.depth)")
+            debugLog("     - Focused: \(textArea.focused)")
+            debugLog("     - Enabled: \(textArea.enabled)")
         }
-        print(String(repeating: "=", count: 60))
+        debugLog(String(repeating: "=", count: 60))
         
         // Also check for scroll areas that might contain the text editor
         let scrollAreas = allElements.filter { $0.role == "AXScrollArea" }
-        print("📊 Found \(scrollAreas.count) AXScrollArea elements in Notes:")
+        debugLog("📊 Found \(scrollAreas.count) AXScrollArea elements in Notes:")
         for (index, scrollArea) in scrollAreas.enumerated() {
-            print("\n   ScrollArea #\(index + 1):")
-            print("     - Title: \(scrollArea.title ?? "nil")")
-            print("     - Identifier: \(scrollArea.identifier ?? "nil")")
-            print("     - Position: \(scrollArea.position?.debugDescription ?? "nil")")
-            print("     - Size: \(scrollArea.size?.debugDescription ?? "nil")")
-            print("     - Depth: \(scrollArea.depth)")
-            print("     - Focused: \(scrollArea.focused)")
+            debugLog("   ScrollArea #\(index + 1):")
+            debugLog("     - Title: \(scrollArea.title ?? "nil")")
+            debugLog("     - Identifier: \(scrollArea.identifier ?? "nil")")
+            debugLog("     - Position: \(scrollArea.position?.debugDescription ?? "nil")")
+            debugLog("     - Size: \(scrollArea.size?.debugDescription ?? "nil")")
+            debugLog("     - Depth: \(scrollArea.depth)")
+            debugLog("     - Focused: \(scrollArea.focused)")
         }
-        print(String(repeating: "=", count: 60))
+        debugLog(String(repeating: "=", count: 60))
         
         // Check for other potentially relevant roles
         let textFields = allElements.filter { $0.role == "AXTextField" }
-        print("📊 Found \(textFields.count) AXTextField elements")
+        debugLog("📊 Found \(textFields.count) AXTextField elements")
         
         let webAreas = allElements.filter { $0.role == "AXWebArea" }
-        print("📊 Found \(webAreas.count) AXWebArea elements")
+        debugLog("📊 Found \(webAreas.count) AXWebArea elements")
         
         let groups = allElements.filter { $0.role == "AXGroup" }
-        print("📊 Found \(groups.count) AXGroup elements")
-        print(String(repeating: "=", count: 60))
+        debugLog("📊 Found \(groups.count) AXGroup elements")
+        debugLog(String(repeating: "=", count: 60))
         
         if textAreas.isEmpty && scrollAreas.isEmpty {
-            print("❌ No text area or scroll area found in Notes")
-            print("💡 Try opening a note and clicking in the text editor area")
+            debugLog("❌ No text area or scroll area found in Notes")
+            debugLog("💡 Try opening a note and clicking in the text editor area")
             return nil
         }
         
         // Strategy 1: Look for focused text area
-        print("\n🎯 Strategy 1: Looking for focused text area...")
+        debugLog("🎯 Strategy 1: Looking for focused text area...")
         for textArea in textAreas {
             if textArea.focused {
-                print("✅ Found Notes text area by focus")
-                print("   Title: \(textArea.title ?? "nil")")
-                print("   Position: \(textArea.position?.debugDescription ?? "nil")")
-                print("   Size: \(textArea.size?.debugDescription ?? "nil")")
+                debugLog("✅ Found Notes text area by focus")
+                debugLog("   Title: \(textArea.title ?? "nil")")
+                debugLog("   Position: \(textArea.position?.debugDescription ?? "nil")")
+                debugLog("   Size: \(textArea.size?.debugDescription ?? "nil")")
                 return textArea
             }
         }
         
-        print("⚠️ No focused text area found")
-        print("\n🎯 Strategy 2: Looking for largest text area...")
+        debugLog("⚠️ No focused text area found")
+        debugLog("🎯 Strategy 2: Looking for largest text area...")
         
         // Strategy 2: Use the largest text area (main content area is usually large)
         let sortedBySize = textAreas
@@ -597,15 +677,15 @@ final class AccessibilityService {
             .sorted { ($0.size!.width * $0.size!.height) > ($1.size!.width * $1.size!.height) }
         
         if let largest = sortedBySize.first {
-            print("✅ Using largest text area in Notes")
-            print("   Size: \(largest.size?.width ?? 0) x \(largest.size?.height ?? 0)")
-            print("   Position: \(largest.position?.debugDescription ?? "nil")")
-            print("   Title: \(largest.title ?? "nil")")
+            debugLog("✅ Using largest text area in Notes")
+            debugLog("   Size: \(largest.size?.width ?? 0) x \(largest.size?.height ?? 0)")
+            debugLog("   Position: \(largest.position?.debugDescription ?? "nil")")
+            debugLog("   Title: \(largest.title ?? "nil")")
             return largest
         }
         
-        print("⚠️ No suitable text area found")
-        print("\n🎯 Strategy 3: Fallback to largest scroll area...")
+        debugLog("⚠️ No suitable text area found")
+        debugLog("🎯 Strategy 3: Fallback to largest scroll area...")
         
         // Strategy 3: Fallback to scroll area if no text area found
         let sortedScrollAreas = scrollAreas
@@ -613,19 +693,19 @@ final class AccessibilityService {
             .sorted { ($0.size!.width * $0.size!.height) > ($1.size!.width * $1.size!.height) }
         
         if let largestScroll = sortedScrollAreas.first {
-            print("✅ Using largest scroll area in Notes as fallback")
-            print("   Size: \(largestScroll.size?.width ?? 0) x \(largestScroll.size?.height ?? 0)")
-            print("   Position: \(largestScroll.position?.debugDescription ?? "nil")")
+            debugLog("✅ Using largest scroll area in Notes as fallback")
+            debugLog("   Size: \(largestScroll.size?.width ?? 0) x \(largestScroll.size?.height ?? 0)")
+            debugLog("   Position: \(largestScroll.position?.debugDescription ?? "nil")")
             return largestScroll
         }
         
-        print(String(repeating: "=", count: 60))
-        print("❌ Could not determine Notes text area")
-        print("💡 Make sure:")
-        print("   1. Notes app is open")
-        print("   2. A note is open")
-        print("   3. Click in the text editing area")
-        print(String(repeating: "=", count: 60))
+        debugLog(String(repeating: "=", count: 60))
+        debugLog("❌ Could not determine Notes text area")
+        debugLog("💡 Make sure:")
+        debugLog("   1. Notes app is open")
+        debugLog("   2. A note is open")
+        debugLog("   3. Click in the text editing area")
+        debugLog(String(repeating: "=", count: 60))
         return nil
     }
 }
